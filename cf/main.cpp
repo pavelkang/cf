@@ -36,9 +36,9 @@ struct more_second {
 
 static void read_file() {
   int user, item, rating, timestamp;
-  ifstream read_file(TRAIN_PATH);
+  ifstream in_file(TRAIN_PATH);
   string line;
-  while (read_file >> user >> item >> rating >> timestamp) {
+  while (in_file >> user >> item >> rating >> timestamp) {
     items.insert(item);
     if (users[user] == NULL) { // non-existent user
       User *u = new User();
@@ -162,20 +162,16 @@ static void recommend(int user, int topn = 5) {
   }
 }
 
-static void init() {
+int main(int argc, char *argv[]) {
   memset(users, 0, INT_MAX);
   num_users = 0;
-}
-
-int main(int argc, char *argv[]) {
-  init();
-  cout << "train: " << TRAIN_PATH << ", test: " << TEST_PATH << endl;
-  double start = CycleTimer::currentSeconds();
+  // cout << "train: " << TRAIN_PATH << ", test: " << TEST_PATH << endl;
+  // double start = CycleTimer::currentSeconds();
   read_file();
-  double end = CycleTimer::currentSeconds();
-  cout << "Reading file takes " << end - start << " seconds" << endl;
-  cout << "There are " << num_users << " users, and " << items.size()
-       << " items." << endl;
+  // double end = CycleTimer::currentSeconds();
+  // cout << "Reading file takes " << end - start << " seconds" << endl;
+  // cout << "There are " << num_users << " users, and " << items.size()
+  //      << " items." << endl;
   recommend(7);
   return 0;
 }
