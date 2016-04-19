@@ -44,6 +44,7 @@ struct more_second {
 };
 
 void CUDA_get_similar_users(double *um, int user, double *similarity_copy, int topn = 5);
+void CUDA_get_recommendations(double *um, int user, double *similarity_copy, int topn = 5);
 
 static void read_file() {
   int user, item, rating, timestamp;
@@ -129,9 +130,8 @@ static void recommend(int user, int topn = 5) {
   double sim[USER_COUNT];
   memset(like, 0, sizeof(double) * ITEM_COUNT);
   memset(sim , 0, sizeof(double) * USER_COUNT);
-  memset(sim , 0, sizeof(double) * USER_COUNT);
-  //get_similar_users(user, sim, topn);
-  CUDA_get_similar_users(users, user, sim, topn);
+  get_similar_users(user, sim, topn);
+  // CUDA_get_similar_users(users, user, sim, topn);
 
   for (int i = 0; i < USER_COUNT; i++) {
       double score = sim[i];
@@ -146,6 +146,7 @@ static void recommend(int user, int topn = 5) {
           }
       }
   }
+  // CUDA_get_recommendations(users, user, like, topn);
 
   for (int i = 0; i < ITEM_COUNT; i++) {
       like_copy[i] = make_pair(i,like[i]);
@@ -176,7 +177,9 @@ int main(int argc, char *argv[]) {
   start = CycleTimer::currentSeconds();
   // cout << "There are " << num_users << " users, and " << items.size()
   //      << " items." << endl;
-  for (int i = 2; i < 942; i++) {
+
+  //recommend(7);
+  for (int i = 1; i < 942; i++) {
     recommend(i);
   }
   end = CycleTimer::currentSeconds();
