@@ -10,20 +10,30 @@ CC_FILES   := main.cpp
 ###########################################################
 
 ARCH=$(shell uname | sed -e 's/-.*//g')
-
 OBJDIR=objs
 CXX=g++ -m64
-CXXFLAGS=-std=c++11 -O3
-ifeq ($(ARCH), Darwin)
-# Building on mac
-LDFLAGS=-L/usr/local/depot/cuda-6.5/lib/ -lcudart
+CXXFLAGS=-O3 -Wall -g -std=gnu++11
+HOSTNAME=$(shell hostname)
+
+LIBS       :=
+FRAMEWORKS :=
+
+ifeq ($(HOSTNAME), latedays.andrew.cmu.edu)
+# Building on Latedays
+NVCCFLAGS=-O3 -m64 -arch compute_20
+LIBS += GL glut cudart
+LDFLAGS=-L/usr/local/cuda/lib64/ -lcudart
 else
 # Building on Linux
-LDFLAGS=-L/usr/local/cuda-7.5/lib64/ -lcudart #-lcublas
+NVCCFLAGS=-O3 -m64 -arch compute_20
+LIBS += GL glut cudart
+LDFLAGS=-L/usr/local/depot/cuda-6.5/lib64/ -lcudart
 endif
-NVCC=nvcc
-NVCCFLAGS=-O3 -m64
 
+LDLIBS  := $(addprefix -l, $(LIBS))
+LDFRAMEWORKS := $(addprefix -framework , $(FRAMEWORKS))
+
+NVCC=nvcc
 
 OBJS=$(OBJDIR)/main.o $(OBJDIR)/sim.o
 
@@ -32,14 +42,8 @@ OBJS=$(OBJDIR)/main.o $(OBJDIR)/sim.o
 
 default: $(EXECUTABLE)
 
-dirs:
-		mkdir -p $(OBJDIR)/
-
-clean:
-		rm -rf $(OBJDIR) *.ppm *~ $(EXECUTABLE)
-
 $(EXECUTABLE): dirs $(OBJS)
-		$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(LDFLAGS)
+		$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(LDFLAGS) $(LDLIBS) $(LDFRAMEWORKS)
 
 $(OBJDIR)/%.o: %.cpp
 		$(CXX) $< $(CXXFLAGS) -c -o $@

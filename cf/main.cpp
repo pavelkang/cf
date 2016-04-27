@@ -129,6 +129,10 @@ static void recommend(int user, int topn = 5) {
   map<int, double> like_table;
   vector< pair<User *, double> > mapcopy;
   get_similar_users(user, mapcopy, topn);
+  for (vector< pair<User *, double> >::iterator it = mapcopy.begin();
+       it != mapcopy.end(); it++) {
+    cout << "sim " << it->first->userid << " - " << it->second << endl;
+  }
   User *me = users[user];
   assert(me != NULL);
   for (auto up : mapcopy) {
@@ -172,6 +176,6 @@ int main(int argc, char *argv[]) {
   // cout << "Reading file takes " << end - start << " seconds" << endl;
   // cout << "There are " << num_users << " users, and " << items.size()
   //      << " items." << endl;
-  recommend(7);
+  //recommend(7);
   return 0;
 }

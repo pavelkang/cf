@@ -13,27 +13,14 @@
 #include <algorithm>
 #include <vector>
 #include <cstring>
+#include "rec.h"
 
 using namespace std;
 
-#define USER_COUNT 944
-#define ITEM_COUNT 2000
-#define IDX(u,i) ((u) * ITEM_COUNT + i)
+const string TRAIN_PATH = "ml-100k/u1.base";
 
-const string TRAIN_PATH = "../ml-100k/u1.base";
-const string TEST_PATH  = "ml-100k/u1.test";
-
-/*
-typedef struct User {
-  //unordered_map<int, int> ratings;
-  int ratings[1500];
-} User;
-*/
-
-double users[USER_COUNT * ITEM_COUNT];
-double simMatrix[USER_COUNT][USER_COUNT];
-int num_users;
-set<int> items;
+int compact_data[DATA_SIZE];
+int compact_index[USER_SIZE];
 
 template <typename T1, typename T2>
 struct more_second {
@@ -43,120 +30,68 @@ struct more_second {
     }
 };
 
-void CUDA_get_similar_users(double *um, int user, double *similarity_copy, int topn = 5);
-void CUDA_get_recommendations(double *um, int user, double *similarity_copy, int topn = 5);
+void CUDA_populate_user_sim_vec(int target_user, int *compact_data,
+                                int *compact_index, double *sim, int topn);
 
-static void read_file() {
+void CUDA_populate_item_like_vec(int user, int *compact_data,
+                                 int *compact_index, double *sim,
+                                 double *like, int topn);
+
+static void read_file_compact() {
   int user, item, rating, timestamp;
   ifstream in_file(TRAIN_PATH);
   string line;
+  int num_data_read = 0;
+  int num_user_read = 0;
   while (in_file >> user >> item >> rating >> timestamp) {
-    items.insert(item);
-    users[IDX(user,item)] = rating;
+    if (user > num_user_read) { // new user
+      compact_index[num_user_read] = 2 * num_data_read;
+      num_user_read++;
+      compact_data[num_data_read * 2] = item;
+      compact_data[num_data_read * 2 + 1] = rating;
+      num_data_read++;
+    } else { // old user
+      compact_data[num_data_read * 2] = item;
+      compact_data[num_data_read * 2 + 1] = rating;
+      num_data_read++;
+    }
   }
-}
-
-static double calc_similarity(int u, int v) {
-  double u_mean = 0.0;
-  double v_mean = 0.0;
-  int u_size = 0;
-  int v_size = 0;
-
-  for (int i = 0; i < ITEM_COUNT; i++) {
-      int rate = users[IDX(u,i)];
-      u_mean += rate;
-      if (rate) u_size++;
-  }
-
-  for (int j = 0; j < ITEM_COUNT; j++) {
-      int rate = users[IDX(v,j)];
-      v_mean += rate;
-      if (rate) v_size++;
-  }
-  u_mean /= u_size;
-  v_mean /= v_size;
-  //assert(u->ratings.size() != 0);
-  //assert(v->ratings.size() != 0);
-  double a = 0.0;
-  double b = 0.0;
-  double c = 0.0;
-  int commons = 0;
-  /* Pearson correlation */
-  for (int i = 0; i < ITEM_COUNT; i++) {
-      if ((users[IDX(u,i)] != 0) && (users[IDX(v,i)]) != 0) {
-          commons++;
-          double rui = users[IDX(u,i)];
-          double rvi = users[IDX(v,i)];
-          a += (rui - u_mean)*(rvi - v_mean);
-          b += (rui-u_mean)*(rui-u_mean);
-          c += (rvi-v_mean)*(rvi-v_mean);
-      }
-  }
-
-  double answer;
-  if (b*c == 0) {
-    answer = a;
-  } else {
-    answer = a / (sqrt(b) * sqrt(c));
-  }
-  // fix pearson
-  if (commons < 5) {
-    answer *= 0.2 * commons;
-  }
-  return answer;
-}
-
-static void get_similar_users(int user, double *similarity_copy, int topn = 5) {
-  //map<User *, double> similarity_table; // <user, similarity>, ordered table
-  double similarity[USER_COUNT];
-
-  for (int i = 0; i < USER_COUNT; i++) {
-      if (i == user) {
-          similarity[i] = 0; // exclude self
-      } else {
-          similarity[i] = calc_similarity(i,user);
-      }
-  }
-
-  memcpy(similarity_copy, similarity, sizeof(double) * USER_COUNT);
+  // for (int i = 0; i < 5; i++) {
+  //   cout << "user " << i+1 << "starts at " << compact_index[i] << endl;
+  //   for (int j = compact_index[i]; j < compact_index[i+1]; j+=2) {
+  //     cout << compact_data[j] << " - " << compact_data[j+1] << endl;
+  //   }
+  // }
 }
 
 
 static void recommend(int user, int topn = 5) {
-  //map<int, double> like_table;
-  //vector< pair<User *, double> > mapcopy;
-  pair<int, double> like_copy[ITEM_COUNT];
-  double like[ITEM_COUNT];
-  double sim[USER_COUNT];
-  memset(like, 0, sizeof(double) * ITEM_COUNT);
-  memset(sim , 0, sizeof(double) * USER_COUNT);
-  get_similar_users(user, sim, topn);
-  // CUDA_get_similar_users(users, user, sim, topn);
-
-  for (int i = 0; i < USER_COUNT; i++) {
-      double score = sim[i];
-      //if (i < 100) {
-          //cout << "Score: " << score << endl;
-      //}
-
-      for (int j = 0; j < ITEM_COUNT; j++) {
-          if (users[IDX(user,j)] == 0) {
-              double item_score = score * users[IDX(i,j)];
-              like[j] += item_score;
-          }
-      }
-  }
+  //pair<int, double> like_copy[ITEM_COUNT];
+  double like[ITEM_SIZE];
+  double sim[USER_SIZE];
+  memset(like, 0, sizeof(double) * ITEM_SIZE);
+  memset(sim , 0, sizeof(double) * USER_SIZE);
+  //CUDA_populate_user_sim_vec(user, compact_data, compact_index, sim, topn);
+  CUDA_populate_item_like_vec(user, compact_data, compact_index,
+                              sim, like, topn);
+  //     for (int j = 0; j < ITEM_COUNT; j++) {
+  //         if (users[IDX(user,j)] == 0) {
+  //             double item_score = score * users[IDX(i,j)];
+  //             like[j] += item_score;
+  //         }
+  //     }
+  // }
   // CUDA_get_recommendations(users, user, like, topn);
 
-  for (int i = 0; i < ITEM_COUNT; i++) {
-      like_copy[i] = make_pair(i,like[i]);
-  }
+  // for (int i = 0; i < ITEM_COUNT; i++) {
+  //     like_copy[i] = make_pair(i,like[i]);
+  // }
 
 
 
   // sort like_table
   // output the first topn items
-  sort(std::begin(like_copy), std::end(like_copy), more_second<int, double>());
+  // sort(std::begin(like_copy), std::end(like_copy), more_second<int, double>());
   /*
   cout << "We recommend:" << endl;
   for (int i = 0; i < topn; i++) {
@@ -167,17 +102,16 @@ static void recommend(int user, int topn = 5) {
 }
 
 int main(int argc, char *argv[]) {
-  memset(users, 0, sizeof(int) * USER_COUNT * ITEM_COUNT);
-  num_users = 0;
   // cout << "train: " << TRAIN_PATH << ", test: " << TEST_PATH << endl;
   double start = CycleTimer::currentSeconds();
-  read_file();
+  read_file_compact();
   double end = CycleTimer::currentSeconds();
   cout << "Reading file takes " << end - start << " seconds" << endl;
   start = CycleTimer::currentSeconds();
   // cout << "There are " << num_users << " users, and " << items.size()
   //      << " items." << endl;
 
+  recommend(7);
   //recommend(7);
   for (int i = 1; i < 942; i++) {
     recommend(i);

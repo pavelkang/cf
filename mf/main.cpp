@@ -6,16 +6,16 @@
 #define MAX_RATINGS 110000
 #define MAX_MOVIES 110000
 #define MAX_CUSTOMERS 110000
-#define MAX_FEATURES 10
-#define MIN_EPOCHS 10
+#define MAX_FEATURES 20
+#define MIN_EPOCHS 120
 
 #define MIN_IMPROVEMENT 0.0001
 #define INIT 0.1
-#define LRATE 0.001
+#define LRATE 0.0001
 #define K 0.015
 
 using namespace std;
-const string TRAIN_PATH = "../ml-100k/u1.base";
+const string TRAIN_PATH = "ml-100k/u1.base";
 
 typedef struct Movie {
   int rating_count;
@@ -45,19 +45,33 @@ private:
   float U[MAX_FEATURES][MAX_MOVIES];
   float I[MAX_FEATURES][MAX_MOVIES];
 public:
-  Recommender(void) {
-    rating_count = 0;
-  };
+  Recommender(void);
   ~Recommender(void){};
   void read_file();
   void preprocess();
   void calc_features();
   double predict(int mov_id, int cust_id, int feature, float cache, bool bTrailing);
+  double predict(int cust_id, int mov_id);
 };
 
 int main(int argc, char *argv[]) {
   Recommender *recommender = new Recommender();
   recommender->read_file();
+  recommender->preprocess();
+  recommender->calc_features();
+  recommender->predict(1, 1);
+  for (int i = 0; i < 100; i++) {
+    cout << recommender->predict(i, i) << endl;
+  }
+  return 0;
+}
+
+Recommender::Recommender(void) {
+  rating_count = 0;
+  for (int f = 0; f < MAX_FEATURES; f++) {
+    for (int i = 1; i < MAX_MOVIES; i++) I[f][i] = (float)INIT;
+    for (int i = 1; i < MAX_CUSTOMERS; i++) U[f][i] = (float)INIT;
+  }
 }
 
 void Recommender::read_file() {
@@ -73,6 +87,7 @@ void Recommender::read_file() {
   }
   //double end = CycleTimer::currentSeconds();
   //cout << "Reading file takes " << end - start << " seconds!" << endl;
+  cout << "Read " << rating_count << " data" << endl;
 }
 
 void Recommender::preprocess() {
@@ -85,7 +100,7 @@ void Recommender::preprocess() {
     customers[ratings[i].cust_id].rating_sum += ratings[i].rating;
   }
   // calculat movie means
-  for (int i = 0; i < MAX_MOVIES; i++) {
+  for (int i = 1; i < MAX_MOVIES; i++) {
     movies[i].rating_mean = movies[i].rating_sum / (1.0 * movies[i].rating_count);
   }
 }
@@ -103,11 +118,24 @@ double Recommender::predict(int mov_id, int cust_id, int feature, float cache, b
   return sum;
 }
 
+double Recommender::predict(int cust_id, int mov_id) {
+  for (int i = 1; i < 5; i++) {
+    cout << U[i][i] << endl;
+  }
+  double sum = 0;
+  for (int f = 0; f < MAX_FEATURES; f++) {
+    sum += U[f][cust_id] * I[f][mov_id];
+  }
+  if (sum < 1) sum = 1;
+  if (sum > 5) sum = 5;
+  return sum;
+}
 
 void Recommender::calc_features() {
     int f, e, i, custId, cnt = 0;
     Data* rating;
-    double err, p, sq, rmse_last, rmse = 2.0;
+    double err, p, sq, rmse_last;
+    double rmse = 2.0;
     short movieId;
     float cf, mf;
     for (f = 0; f < MAX_FEATURES; f++) { // train each feature
@@ -121,6 +149,7 @@ void Recommender::calc_features() {
           custId = rating->cust_id;
 
           p = predict(movieId, custId, f, rating->cache, true);
+          cout << p << endl;
           err = (1.0 * rating->rating - p);
           sq += err*err;
 
@@ -137,5 +166,6 @@ void Recommender::calc_features() {
         rating = ratings + i;
         rating->cache = (double) predict(rating->mov_id, rating->cust_id, f, rating->cache, false);
       }
+      cnt = 0;
     }
 }
