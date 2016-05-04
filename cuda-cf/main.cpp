@@ -19,6 +19,7 @@ using namespace std;
 #define USER_COUNT 944
 #define ITEM_COUNT 2000
 #define IDX(u,i) ((u) * ITEM_COUNT + i)
+#define IDX_T(u,i) ((i) * USER_COUNT + u)
 
 const string TRAIN_PATH = "../ml-100k/u1.base";
 const string TEST_PATH  = "ml-100k/u1.test";
@@ -31,7 +32,8 @@ typedef struct User {
 */
 
 double users[USER_COUNT * ITEM_COUNT];
-double simMatrix[USER_COUNT][USER_COUNT];
+double users_t[USER_COUNT * ITEM_COUNT];
+double simMatrix[USER_COUNT * USER_COUNT];
 int num_users;
 set<int> items;
 
@@ -45,6 +47,7 @@ struct more_second {
 
 void CUDA_get_similar_users(double *um, int user, double *similarity_copy, int topn = 5);
 void CUDA_get_recommendations(double *um, int user, double *similarity_copy, int topn = 5);
+void computeCorrelation(double *rate, double *rate_t, double *out) ;
 
 static void read_file() {
   int user, item, rating, timestamp;
@@ -53,6 +56,7 @@ static void read_file() {
   while (in_file >> user >> item >> rating >> timestamp) {
     items.insert(item);
     users[IDX(user,item)] = rating;
+    users_t[IDX_T(user,item)] = rating;
   }
 }
 
@@ -105,6 +109,7 @@ static double calc_similarity(int u, int v) {
   }
   return answer;
 }
+
 
 static void get_similar_users(int user, double *similarity_copy, int topn = 5) {
   //map<User *, double> similarity_table; // <user, similarity>, ordered table
@@ -173,15 +178,26 @@ int main(int argc, char *argv[]) {
   double start = CycleTimer::currentSeconds();
   read_file();
   double end = CycleTimer::currentSeconds();
+  double sim[USER_COUNT];
+  CUDA_get_similar_users(users, 7, sim, 5);
   cout << "Reading file takes " << end - start << " seconds" << endl;
   start = CycleTimer::currentSeconds();
   // cout << "There are " << num_users << " users, and " << items.size()
   //      << " items." << endl;
+  //
 
+  double *simsim = (double *) malloc(sizeof(double) * USER_COUNT * USER_COUNT);
   //recommend(7);
-  for (int i = 1; i < 942; i++) {
-    recommend(i);
+  //for (int i = 1; i < 942; i++) {
+  //  recommend(i);
+  //}
+  //
+  computeCorrelation(users, users_t, simMatrix);
+  //#pragma unroll
+  for (int i = 0; i < USER_COUNT; i++) {
+      cout << i << ": "<< sim[i] << " || " << simMatrix[7 * USER_COUNT + i] << endl;
   }
+
   end = CycleTimer::currentSeconds();
   cout << "940 recommendations took: " << end - start << " seconds" << endl;
   return 0;
