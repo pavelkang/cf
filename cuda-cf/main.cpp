@@ -48,6 +48,7 @@ struct more_second {
 void CUDA_get_similar_users(double *um, int user, double *similarity_copy, int topn = 5);
 void CUDA_get_recommendations(double *um, int user, double *similarity_copy, int topn = 5);
 void computeCorrelation(double *rate, double *rate_t, double *out) ;
+void CUDA_get_rec_with_sim(double *users, double *sim, int user, double *recommendation_copy, int topn = 5);
 
 static void read_file() {
   int user, item, rating, timestamp;
@@ -135,6 +136,7 @@ static void recommend(int user, int topn = 5) {
   double sim[USER_COUNT];
   memset(like, 0, sizeof(double) * ITEM_COUNT);
   memset(sim , 0, sizeof(double) * USER_COUNT);
+  /*
   get_similar_users(user, sim, topn);
   // CUDA_get_similar_users(users, user, sim, topn);
 
@@ -151,7 +153,9 @@ static void recommend(int user, int topn = 5) {
           }
       }
   }
-  // CUDA_get_recommendations(users, user, like, topn);
+  */
+  CUDA_get_recommendations(users, user, like, topn);
+  //CUDA_get_rec_with_sim(users, simMatrix, user, like, topn);
 
   for (int i = 0; i < ITEM_COUNT; i++) {
       like_copy[i] = make_pair(i,like[i]);
@@ -162,6 +166,7 @@ static void recommend(int user, int topn = 5) {
   // sort like_table
   // output the first topn items
   sort(std::begin(like_copy), std::end(like_copy), more_second<int, double>());
+
   /*
   cout << "We recommend:" << endl;
   for (int i = 0; i < topn; i++) {
@@ -182,21 +187,15 @@ int main(int argc, char *argv[]) {
   CUDA_get_similar_users(users, 7, sim, 5);
   cout << "Reading file takes " << end - start << " seconds" << endl;
   start = CycleTimer::currentSeconds();
+  computeCorrelation(users, users_t, simMatrix);
   // cout << "There are " << num_users << " users, and " << items.size()
   //      << " items." << endl;
   //
-
-  double *simsim = (double *) malloc(sizeof(double) * USER_COUNT * USER_COUNT);
   //recommend(7);
-  //for (int i = 1; i < 942; i++) {
-  //  recommend(i);
-  //}
-  //
-  computeCorrelation(users, users_t, simMatrix);
-  //#pragma unroll
-  for (int i = 0; i < USER_COUNT; i++) {
-      cout << i << ": "<< sim[i] << " || " << simMatrix[7 * USER_COUNT + i] << endl;
+  for (int i = 1; i < 942; i++) {
+    recommend(i);
   }
+  //
 
   end = CycleTimer::currentSeconds();
   cout << "940 recommendations took: " << end - start << " seconds" << endl;

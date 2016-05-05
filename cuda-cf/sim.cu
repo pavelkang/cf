@@ -285,3 +285,33 @@ void CUDA_get_recommendations(double *um, int user, double *recommendation_copy,
     cudaFree(d_sim);
     cudaFree(d_out);
 }
+
+
+void CUDA_get_rec_with_sim(double *users, double *sim, int user, double *recommendation_copy, int topn = 5) {
+
+    double *d_sim;
+    double *d_users;
+    double *d_out;
+    cudaMalloc((void **)&d_sim , USER_COUNT * sizeof(double));
+    cudaMalloc((void **)&d_users, USER_COUNT * ITEM_COUNT * sizeof(double));
+    cudaMalloc((void **)&d_out , ITEM_COUNT * sizeof(double));
+
+    cudaMemcpy(d_users, users, USER_COUNT * ITEM_COUNT * sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_sim, &(sim[user * USER_COUNT]), USER_COUNT * sizeof(double), cudaMemcpyHostToDevice);
+
+    dim3 dim_grid(UPDIV(ITEM_COUNT, BLOCK_SIZE));
+    dim3 dim_block(BLOCK_SIZE);
+
+    recommendation_kernel<<<dim_grid, dim_block>>>(d_sim, d_users, d_out, user, USER_COUNT, ITEM_COUNT);
+
+    cudaMemcpy(recommendation_copy, d_out, ITEM_COUNT * sizeof(double), cudaMemcpyDeviceToHost);
+
+    cudaError_t errCode = cudaPeekAtLastError();
+    if (errCode != cudaSuccess) {
+        fprintf(stderr, "WARNING: A CUDA error occured: code=%d, %s\n", errCode, cudaGetErrorString(errCode));
+    }
+
+    cudaFree(d_users);
+    cudaFree(d_sim);
+    cudaFree(d_out);
+}
