@@ -1,4 +1,7 @@
+#include <thrust/sort.h>
+#include <thrust/sequence.h>
 #include <thrust/host_vector.h>
+#include <thrust/fill.h>
 #include <thrust/device_vector.h>
 #include <iostream>
 #include <stdio.h>
@@ -8,6 +11,32 @@
 #include "rec.h"
 
 using namespace std;
+
+typedef struct Band {
+  int x1;
+  int x2;
+  int x3;
+  int user;
+} Band;
+
+struct BandCmp {
+  __host__ __device__
+  bool operator() (const Band & o1, const Band & o2) {
+    if (o1.x1 < o2.x1) {
+      return true;
+    } else if (o1.x1 > o2.x1) {
+      return false;
+    } else {
+      if (o1.x2 < o2.x2) {
+        return true;
+      } else if (o1.x2 > o2.x2) {
+        return false;
+      } else {
+        return o1.x3 < o2.x3;
+      }
+    }
+  }
+};
 
 #define IDX(u, i, width) ((u) * (ITEM_COUNT) + i)
 
@@ -51,8 +80,82 @@ __global__ void mean_kernel(int *compact_data, int *compact_index, double *mean)
   mean[tid] = 2 * sum / (endIdx - startIdx);
 }
 
+
+__global__ void hash_kernel(int *hashed_matrix, int *as, int *bs) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int (tid >= ITEM_SIZE)
+    return ;
+  __shared__ int ass[100];
+  __shared__ int bss[100];
+  if (tid < 100) {
+    ass[tid] = as[tid];
+    bss[tid] = bs[tid];
+  }
+  __syncthreads();
+
+  for (int i = 0; i < 100; i++) {
+    hashed_matrix[tid * 100 + i] = (as[i] * tid + bs[i]) % ITEM_SIZE;
+  }
+
+}
+
+__global__ void binarize(int *compact_data, int *compact_index, double *mean) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  if (tid >= USER_SIZE)
+    return ;
+  int startIdx = compact_index[tid];
+  int endIdx;
+  if (tid == USER_SIZE-1) {
+    endIdx = DATA_SIZE;
+  } else {
+    endIdx = compact_index[tid+1];
+  }
+
+  for (int i = startIdx; i < endIdx; i+=2) {
+    if (compact_data[i+1] >= mean[tid]) {
+      compact_data[i+1] = 1;
+    } else {
+      compact_data[i+1] = 0;
+    }
+  }
+}
+
+__global__ void lsh_kernel(int *compact_data, int *compact_index,
+                           int *hashed_matrix, int *sigs) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  if (tid >= USER_SIZE)
+    return ;
+  // put hashed matrix into shared memory
+  __shared__ int hash[ITEM_SIZE * 100];
+  if (tid < ITEM_SIZE * 100) {
+    hash[tid] = hashed_matrix[tid];
+  }
+  __syncthreads();
+
+  int u_start = compact_index[tid];
+  int u_end;
+  if (tid == USER_SIZE - 1) {
+    u_end = DATA_SIZE - 1;
+  } else {
+    u_end = compact_index[tid+1];
+  }
+
+  for (int i = u_start; i < u_end; i+=2) {
+    int item = compact_data[i];
+    int rating = compact_data[i+1];
+    if (rating == 0)
+      continue;
+    for (int j = 0; j < 100; j++) {
+      // for all possible hash functions
+      int hashed_item = hash[item * 100 + j];
+      sigs[tid * 100 + j] = min(sigs[tid * 100 + j], hashed_item);
+    }
+  }
+}
+
+
 __global__ void recommendation_kernel(int user, int *compact_data, int *compact_index,
-                           double *sim, double *like) {
+                                      double *sim, double *like) {
   user = user - 1;
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if (tid >= USER_SIZE)
@@ -200,6 +303,85 @@ void CUDA_populate_user_sim_vec(int target_user, int *compact_data,
   cudaFree(mean_cuda);
 }
 
+static void ann_compact(int *compact_data, int *compact_index) {
+  // 1. calculate mean and assign 1/0
+  int *compact_data_cuda;
+  int *compact_index_cuda;
+  double *mean_cuda;
+  cudaMalloc((void **)&compact_data_cuda, DATA_SIZE*sizeof(int));
+  cudaMalloc((void **)&compact_index_cuda, USER_SIZE*sizeof(int));
+  cudaMalloc((void **)&mean_cuda, USER_SIZE*sizeof(double));
+  cudaMemcpy(compact_data_cuda, compact_data, DATA_SIZE*sizeof(int),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(compact_index_cuda, compact_index, USER_SIZE*sizeof(int),
+             cudaMemcpyHostToDevice);
+  int tpb = 1024;
+  mean_kernel<<<UPDIV(USER_SIZE, tpb), tpb>>>(compact_data_cuda,
+                                               compact_index_cuda,
+                                               mean_cuda);
+  binarize<<<UPDIV(USER_SIZE, tpb), tpb>>>(compact_data_cuda,
+                                           compact_index_cuda,
+                                           mean_cuda);
+  // 2. generate the signature matrix
+  int n = 100;
+  thrust::host_vector<int> sig(USER_SIZE * n);
+  thrust::host_vector<int> as(n);
+  thrust::host_vector<int> bs(n);
+
+  for (int i = 0; i < n; i++) {
+    as[i] = rand() % ITEM_SIZE;
+    bs[i] = rand() % ITEM_SIZE;
+  }
+
+  thrust::fill(sig.begin(), sig.end(), INT_MAX);
+
+  // map each item to a thread
+
+  int *ass = thrust::raw_pointer_cast(&as[0]);
+  int *bss = thrust::raw_pointer_cast(&bs[0]);
+  int *sigs= thrust::raw_pointer_cast(&sig[0]);
+
+  int tpb = 1024;
+
+  // hashed items matrix
+  // hashed_matrix[i*n + j] : i's item index using hash fxn j
+  int hashed_matrix[ITEM_SIZE * n];
+  hash_kernel<<<UPDIV(ITEM_SIZE, tpb), tpb>>>(hashed_matrix, ass, bss);
+
+  lsh_kernel<<<UPDIV(ITEM_SIZE, tpb), tpb>>>(compact_data_cuda,
+                                             compact_index_cuda,
+                                             hashed_matrix, sigs);
+
+
+  // 3. union find
+
+  thrust::sequence(uf.begin(), uf.end());
+
+  int band_len = 3;
+
+  for (int band = 0; band < n; band+=band_len) {
+    thrust::host_vector<Band> v(USER_SIZE);
+    for (int i = 0; i < USER_SIZE; i++) {
+      Band b;
+      b.x1 = sigs[i * 100 + 0];
+      b.x2 = sigs[i * 100 + 1];
+      b.x3 = sigs[i * 100 + 2];
+      b.user = i;
+      v.push_back(b);
+    }
+    thrust::sort(v.begin(), v.end(), BandCmp);
+    for (int i = 0; i < UESR_SIZE-1; i++) {
+      Band b1 = v[i];
+      Band b2 = v[i+1];
+      if (b1.x1 == b2.x1 && b1.x2 == b2.x2 && b1.x3 == b2.x3) {
+        uf_union(uf_find(b1.user, b2.user), uf_find(b1.user, b2.user));
+      }
+    }
+  }
+}
+
+
+
 void CUDA_populate_item_like_vec(int user, int *compact_data,
                                  int *compact_index, double *sim,
                                  double *like, int topn) {
@@ -235,6 +417,7 @@ void CUDA_populate_item_like_vec(int user, int *compact_data,
   cudaFree(mean_cuda);
 }
 
+
 /**
  * Preprocess the data
  **/
@@ -263,7 +446,7 @@ static void ann(vector< vector<int> > &data) {
   int sig[USER_SIZE][n];
   int as[n];
   int bs[n];
-  int cs[n];
+
   for (int i = 0; i < n; i++) {
     as[i] = rand() % ITEM_SIZE;
     bs[i] = rand() % ITEM_SIZE;
@@ -275,11 +458,25 @@ static void ann(vector< vector<int> > &data) {
     }
   }
 
-  for (int i = 1; i <= ITEM_SIZE; i++) {
-    cs[i] = (as[i] * i + bs[i] ) % ITEM_SIZE;
+  for (int item = 0; item < ITEM_SIZE; item++) {
+    // 1. compute permuted rows
+    for (int i = 0; i < n; i++) {
+      cs[i] = (as[i] * item + bs[i]) % ITEM_SIZE;
+    }
+    // 2. for each column c:
+    for (int user = 0; user < USER_SIZE; user++) {
+      if (data[user][item] == 0) {
+        // do nothing
+      } else {
+        for (int x = 1; x < n; x++) {
+          sig[user][x] = min(sig[user][x], cs[x]);
+        }
+      }
+    }
   }
 
-  for (int i = 1; i <= ITEM_SIZE; i++) {
+
+  for (int r = 0; i < ITEM_SIZE; i++) {
     for (int hash = 0; hash < n; hash++) {
       for (int user = 1; user < USER_SIZE; user++) {
         sig[hash][user] = cs[hash];

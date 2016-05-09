@@ -1,0 +1,1 @@
+/opt/gcc/4.9.2/bin/c++       CMakeFiles/cf.dir/main.cpp.o  -o cf -rdynamic 

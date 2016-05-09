@@ -17,7 +17,8 @@
 
 using namespace std;
 
-const string TRAIN_PATH = "ml-100k/u1.base";
+const string TRAIN_PATH = "1.dat";
+//const string TRAIN_PATH = "ml-100k/u1.base";
 
 int compact_data[DATA_SIZE];
 int compact_index[USER_SIZE];
@@ -56,6 +57,7 @@ static void read_file_compact() {
       num_data_read++;
     }
   }
+  cout << "read "<< num_data_read << " data." << endl;
   // for (int i = 0; i < 5; i++) {
   //   cout << "user " << i+1 << "starts at " << compact_index[i] << endl;
   //   for (int j = compact_index[i]; j < compact_index[i+1]; j+=2) {
@@ -71,7 +73,7 @@ static void recommend(int user, int topn = 5) {
   double sim[USER_SIZE];
   memset(like, 0, sizeof(double) * ITEM_SIZE);
   memset(sim , 0, sizeof(double) * USER_SIZE);
-  //CUDA_populate_user_sim_vec(user, compact_data, compact_index, sim, topn);
+  // CUDA_populate_user_sim_vec(user, compact_data, compact_index, sim, topn);
   CUDA_populate_item_like_vec(user, compact_data, compact_index,
                               sim, like, topn);
   //     for (int j = 0; j < ITEM_COUNT; j++) {
@@ -102,18 +104,15 @@ static void recommend(int user, int topn = 5) {
 }
 
 int main(int argc, char *argv[]) {
-  // cout << "train: " << TRAIN_PATH << ", test: " << TEST_PATH << endl;
+  cout << "train: " << TRAIN_PATH << endl;
+  cout << USER_SIZE << endl;
   double start = CycleTimer::currentSeconds();
   read_file_compact();
   double end = CycleTimer::currentSeconds();
   cout << "Reading file takes " << end - start << " seconds" << endl;
   start = CycleTimer::currentSeconds();
-  // cout << "There are " << num_users << " users, and " << items.size()
-  //      << " items." << endl;
-
-  recommend(7);
   //recommend(7);
-  for (int i = 1; i < 942; i++) {
+  for (int i = 1; i < USER_SIZE; i++) {
     recommend(i);
   }
   end = CycleTimer::currentSeconds();

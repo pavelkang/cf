@@ -22,7 +22,11 @@ const string TRAIN_PATH = "ml-100k/u1.base";
 int compact_data[DATA_SIZE];
 int compact_index[USER_SIZE];
 
+int compact_data_item[DATA_SIZE];
+int compact_index_item[ITEM_SIZE];
+
 vector< vector<int> > data(USER_SIZE+5, vector<int>(ITEM_SIZE+5));
+vector< vector<int> > data_item(USER_SIZE+5, vector<int>(ITEM_SIZE+5));
 
 template <typename T1, typename T2>
 struct more_second {
@@ -48,6 +52,14 @@ static void read_file() {
   }
 }
 
+static void read_file_item() {
+  int user, item, rating, timestamp;
+  ifstream in_file(TRAIN_PATH);
+  string line;
+  while (in_file >> user >> item >> rating >> timestamp) {
+    data_item[item][user] = rating;
+  }
+}
 
 static void read_file_compact() {
   int user, item, rating, timestamp;
@@ -68,15 +80,24 @@ static void read_file_compact() {
       num_data_read++;
     }
   }
-  // Test
-  // for (int i = 0; i < 5; i++) {
-  //   cout << "user " << i+1 << "starts at " << compact_index[i] << endl;
-  //   for (int j = compact_index[i]; j < compact_index[i+1]; j+=2) {
-  //     cout << compact_data[j] << " - " << compact_data[j+1] << endl;
-  //   }
-  // }
 }
 
+static void read_file_compact_item() {
+  read_file();
+  int index = 0;
+  int rating;
+  for (int i = 0; i < ITEM_SIZE; i++) {
+    compact_index_item[i] = index;
+    for (int j = 0; j < USER_SIZE; j++) {
+      rating = data_item[i][j];
+      if (rating > 0) { // there is a rating
+        compact_data_item[index] = j;
+        compact_data_item[index+1] = rating;
+        index += 2;
+      }
+    }
+  }
+}
 
 static void recommend(int user, int topn = 5) {
   //pair<int, double> like_copy[ITEM_COUNT];

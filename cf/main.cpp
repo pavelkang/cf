@@ -14,7 +14,7 @@
 #include <vector>
 using namespace std;
 
-const string TRAIN_PATH = "../ml-100k/u1.base";
+const string TRAIN_PATH = "ml-100k/u1.base";
 const string TEST_PATH  = "ml-100k/u1.test";
 
 typedef struct User {
@@ -107,14 +107,14 @@ static void get_similar_users(int user, vector< pair<User *, double> > &mapcopy,
     User *other_user = users[i];
     assert(other_user != NULL);
     double sim = calc_similarity(other_user, me);
-    assert(!isnan(sim));
+    //assert(!isnan(sim));
     similarity_table[other_user] = sim;
   }
   for (int i = user+1; i <= num_users; i++) {
     User *other_user = users[i];
     assert(other_user != NULL);
     double sim = calc_similarity(other_user, me);
-    assert(!isnan(sim));
+    //assert(!isnan(sim));
     similarity_table[other_user] = sim;
   }
   for (map<User *, double>::iterator it = similarity_table.begin();
@@ -138,7 +138,7 @@ static void recommend(int user, int topn = 5) {
   for (auto up : mapcopy) {
     User *other = up.first;
     double score = up.second;
-    assert(!(isnan(score)));
+    //assert(!(isnan(score)));
     for (unordered_map<int, int>::iterator it = other->ratings.begin();
          it != other->ratings.end();
          ++it) {
@@ -146,7 +146,7 @@ static void recommend(int user, int topn = 5) {
       if (me->ratings.find(item) == me->ratings.end()) { // i have not rated
         // add to like_table
         double item_score = score * it->second;
-        assert(!(isnan(item_score)));
+        //assert(!(isnan(item_score)));
         if (like_table.find(item) != like_table.end()) {
           like_table[item] += item_score;
         } else {
@@ -176,6 +176,8 @@ int main(int argc, char *argv[]) {
   // cout << "Reading file takes " << end - start << " seconds" << endl;
   // cout << "There are " << num_users << " users, and " << items.size()
   //      << " items." << endl;
-  //recommend(7);
+  for (int i = 1; i <= 940; i++) {
+    recommend(i);
+  }
   return 0;
 }

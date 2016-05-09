@@ -31,6 +31,50 @@ __global__ void mean_kernel(int *compact_data, int *compact_index, double *mean)
   mean[tid] = 2 * sum / (endIdx - startIdx);
 }
 
+
+__global__ void recommendation_kernel_naive(int user, int *compact_data,
+                                            int *compact_index,
+                                            double *sim, double *like) {
+  user = user - 1;
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  if (tid >= USER_SIZE)
+    return ;
+  int u_start = compact_index[user];
+  int v_start = compact_index[tid];
+  int u_end, v_end;
+  if (user == USER_SIZE - 1) {
+    u_end = DATA_SIZE - 1;
+  } else {
+    u_end = compact_index[user+1];
+  }
+  if (tid == DATA_SIZE - 1) {
+    v_end = DATA_SIZE - 1;
+  } else {
+    v_end = compact_index[tid+1];
+  }
+
+  int i, j;
+  int item_i, item_j;
+  bool in = false;
+
+
+  for (j = v_start; j < v_end; j+=2) {
+    item_j = compact_data[j];
+    for (i = u_start; i < u_end; i+=2) {
+      item_i = compact_data[i];
+      if (item_i == item_j) {
+        in = true;
+        break;
+      }
+    }
+    if (in == true) {
+      in = false;
+    } else {
+      like[item_j] += sim[tid] * compact_data[j+1];
+    }
+  }
+}
+
 __global__ void recommendation_kernel(int user, int *compact_data, int *compact_index,
                            double *sim, double *like) {
   user = user - 1;
@@ -75,6 +119,65 @@ __global__ void recommendation_kernel(int user, int *compact_data, int *compact_
       j += 2;
     }
   }
+}
+
+__global__ void similarity_kernel_naive(int user, int *compact_data,
+                                  int *compact_index,
+                                  double *sim, double *mean) {
+  user = user - 1;
+  // tid is other_user
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  if (tid >= USER_SIZE)
+    return ;
+  double a = 0.0;
+  double b = 0.0;
+  double c = 0.0;
+  int commons = 0;
+  double u_mean = mean[user];
+  double v_mean = mean[tid];
+  int u_start = compact_index[user];
+  int v_start = compact_index[tid];
+  int u_end, v_end;
+  if (user == USER_SIZE - 1) {
+    u_end = DATA_SIZE - 1;
+  } else {
+    u_end = compact_index[user+1];
+  }
+  if (tid == DATA_SIZE - 1) {
+    v_end = DATA_SIZE - 1;
+  } else {
+    v_end = compact_index[tid+1];
+  }
+
+  int item_i, item_j;
+  double rui, rvi;
+
+  for (int i = u_start; i < u_end; i+=2) {
+    item_i = compact_data[i];
+    for (int j = v_start; j < v_end; j+=2) {
+      item_j = compact_data[j];
+      if (item_i == item_j) {
+        commons++;
+        rui = compact_data[i+1];
+        rvi = compact_data[j+1];
+        a += (rui - u_mean) * (rvi - v_mean);
+        b += (rui - u_mean) * (rui - u_mean);
+        c += (rvi - v_mean) * (rvi - v_mean);
+        break;
+      }
+    }
+  }
+  double answer;
+  if (b * c == 0) {
+    answer = a;
+  } else {
+    answer = a / (sqrt(b) * sqrt(c));
+  }
+  if (commons < 5) {
+    answer *= 0.2 * commons;
+  }
+  sim[tid] = answer;
+
 }
 
 __global__ void similarity_kernel(int user, int *compact_data,
@@ -139,6 +242,7 @@ __global__ void similarity_kernel(int user, int *compact_data,
   sim[tid] = answer;
 }
 
+
 /*
   populate the sim vector
  */
@@ -171,10 +275,6 @@ void CUDA_populate_user_sim_vec(int target_user, int *compact_data,
                                                      compact_index_cuda,
                                                      sim_cuda, mean_cuda);
   cudaMemcpy(sim, sim_cuda, USER_SIZE*sizeof(double), cudaMemcpyDeviceToHost);
-  cout << "finished sim" << endl;
-  for (int i=0; i < USER_SIZE; i++) {
-    cout << "sim " << i << ": " << sim[i] << endl;
-  }
   cudaFree(sim_cuda);
   cudaFree(mean_cuda);
 }
@@ -206,10 +306,16 @@ void CUDA_populate_item_like_vec(int user, int *compact_data,
                                                     compact_data_cuda,
                                                     compact_index_cuda,
                                                     sim_cuda, mean_cuda);
+  //cudaMemcpy(sim, sim_cuda, USER_SIZE*sizeof(double), cudaMemcpyDeviceToHost);
+
+
   recommendation_kernel<<<UPDIV(USER_SIZE, tpb), tpb>>>(user,
                                                         compact_data_cuda,
                                                         compact_index_cuda,
                                                         sim_cuda, like_cuda);
+
+  cudaMemcpy(like, like_cuda, USER_SIZE*sizeof(double), cudaMemcpyDeviceToHost);
+
   cudaFree(sim_cuda);
   cudaFree(mean_cuda);
 }
